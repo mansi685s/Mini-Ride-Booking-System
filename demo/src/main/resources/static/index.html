@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mini Ride Booking System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+    <!-- AUTHENTICATION FORM -->
+    <div id="auth-box">
+        <h2 id="auth-title">Login / Register</h2>
+        <input type="text" id="name" placeholder="Full Name (For registration)">
+        <input type="email" id="email" placeholder="Email" required>
+        <input type="password" id="password" placeholder="Password" required>
+        <select id="role">
+            <option value="PASSENGER">Passenger</option>
+            <option value="DRIVER">Driver</option>
+        </select>
+        <button id="primary-btn" onclick="login()">Login</button>
+        <p style="text-align: center; font-size: 14px;">
+            <a href="#" onclick="toggleAuthMode()">Toggle Registration Mode</a>
+        </p>
+    </div>
+
+    <!-- PASSENGER DASHBOARD -->
+    <div id="passenger-dashboard" class="hidden">
+        <h2>Book a Ride</h2>
+        <p>Welcome, <span id="passenger-name"></span>!</p>
+        <input type="text" id="pickup" placeholder="Enter Pickup Location">
+        <input type="text" id="dropoff" placeholder="Enter Drop-off Location">
+        <button onclick="requestRide()">Request Ride Now</button>
+        
+        <div id="ride-status" class="card hidden">
+            <h3>Ride Details</h3>
+            <p><strong>Status:</strong> <span id="status-text">Processing...</span></p>
+            <p><strong>Estimated Distance:</strong> <span id="distance-text">-</span> km</p>
+            <p><strong>Total Fare:</strong> $<span id="fare-text">-</span></p>
+            <p><strong>Driver:</strong> <span id="driver-text">Searching...</span></p>
+            <button id="complete-btn" class="hidden" onclick="completeCurrentRide()">Complete Ride</button>
+        </div>
+    </div>
+
+    <!-- DRIVER DASHBOARD -->
+    <div id="driver-dashboard" class="hidden">
+        <h2>Driver Panel</h2>
+        <p>Welcome Driver, <span id="driver-profile-name"></span>!</p>
+        <div id="no-rides">No rides assigned to you at the moment. Keep this page open!</div>
+        <div id="assigned-ride" class="card hidden">
+            <h3>Assigned Trip</h3>
+            <p><strong>Pickup:</strong> <span id="d-pickup"></span></p>
+            <p><strong>Dropoff:</strong> <span id="d-dropoff"></span></p>
+            <p><strong>Fare:</strong> $<span id="d-fare"></span></p>
+            <button onclick="completeCurrentRideDriverSide()" style="background-color: #007bff;">Mark as Completed</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'http://localhost:8080/api';
+    let currentUser = null;
+    let isRegisterMode = false;
+    let activeRideId = null;
+
+    function toggleAuthMode() {
+        isRegisterMode = !isRegisterMode;
+        document.getElementById('auth-title').innerText = isRegisterMode ? "Register Account" : "Login";
+        document.getElementById('primary-btn').innerText = isRegisterMode ? "Register" : "Login";
+    }
+
+    async function login() {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const name = document.getElementById('name').value;
+        const role = document.getElementById('role').value;
+
+        const endpoint = isRegisterMode ? '/users/register' : '/users/login';
+        const payload = isRegisterMode ? { name, email, password, role } : { email, password };
+
+        try {
+            const response = await fetch(API_URL + endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error(await response.text());
+            
+            currentUser = await response.json();
+            document.getElementById('auth-box').classList.add('hidden');
+            
+            if (currentUser.role === 'PASSENGER') {
+                document.getElementById('passenger-dashboard').classList.remove('hidden');
+                document.getElementById('passenger-name').innerText = currentUser.name;
+            } else {
+                document.getElementById('driver-dashboard').classList.remove('hidden');
+                document.getElementById('driver-profile-name').innerText = currentUser.name;
+                checkDriverStatus();
+            }
+        } catch (err) {
+            alert("Error: " + err.message);
+        }
+    }
+
+    async function requestRide() {
+        const pickup = document.getElementById('pickup').value;
+        const dropoff = document.getElementById('dropoff').value;
+
+        if(!pickup || !dropoff) return alert("Please fill details");
+
+        try {
+            const response = await fetch(API_URL + '/rides/request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    passenger: { id: currentUser.id },
+                    pickupLocation: pickup,
+                    dropOffLocation: dropoff
+                })
+            });
+
+            const ride = await response.json();
+            activeRideId = ride.id;
+
+            document.getElementById('ride-status').classList.remove('hidden');
+            document.getElementById('status-text').innerText = ride.status;
+            document.getElementById('distance-text').innerText = ride.distanceKm;
+            document.getElementById('fare-text').innerText = ride.fare;
+            
+            if(ride.driver) {
+                document.getElementById('driver-text').innerText = ride.driver.name;
+                document.getElementById('complete-btn').classList.remove('hidden');
+            } else {
+                document.getElementById('driver-text').innerText = "No drivers available near you.";
+            }
+        } catch(err) {
+            alert("Error processing ride");
+        }
+    }
+
+    async function completeCurrentRide() {
+        if(!activeRideId) return;
+        await fetch(`${API_URL}/rides/${activeRideId}/complete`, { method: 'POST' });
+        alert("Ride finished! Thank you.");
+        document.getElementById('ride-status').classList.add('hidden');
+        activeRideId = null;
+    }
+
+    // Optional simulated checking for the driver's side updates
+    function checkDriverStatus() {
+         // In a broader app, you'd periodically long poll or use WebSockets here
+         console.log("Driver listening for ride dispatches...");
+    }
+</script>
+</body>
+</html>
