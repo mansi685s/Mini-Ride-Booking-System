@@ -1,8 +1,13 @@
 package com.mansi.ridebooking.demo.controller;
+
+import com.mansi.ridebooking.demo.model.Location;
 import com.mansi.ridebooking.demo.model.Ride;
 import com.mansi.ridebooking.demo.model.User;
+import com.mansi.ridebooking.demo.repository.LocationRepository;
 import com.mansi.ridebooking.demo.repository.RideRepository;
 import com.mansi.ridebooking.demo.repository.UserRepository;
+import com.mansi.ridebooking.demo.util.DistanceUtil;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,10 +26,34 @@ public class RideController {
     @Autowired
     private UserRepository userRepository;
 
-    // 1. Request a Ride (Fare calculation: Base $5 + $2 per km)
+    @Autowired
+    private LocationRepository locationRepository;
+
+    // Request Ride
     @PostMapping("/request")
     public ResponseEntity<?> requestRide(@RequestBody Ride rideRequest) {
-        double distance = Math.random() * 15 + 1; // Simulated distance between 1 and 16 km
+
+        // Fetch pickup and drop locations from database
+        Location pickup =
+                locationRepository.findByLocationName(rideRequest.getPickupLocation());
+
+        Location drop =
+                locationRepository.findByLocationName(rideRequest.getDropLocation());
+
+        if (pickup == null || drop == null) {
+            return ResponseEntity.badRequest()
+                    .body("Invalid Pickup or Drop Location");
+        }
+
+        // Calculate distance
+        double distance = DistanceUtil.calculateDistance(
+                pickup.getLatitude(),
+                pickup.getLongitude(),
+                drop.getLatitude(),
+                drop.getLongitude()
+        );
+
+        // Fare Calculation
         double baseFare = 5.0;
         double perKmRate = 2.0;
         double totalFare = baseFare + (distance * perKmRate);
@@ -33,42 +62,58 @@ public class RideController {
         rideRequest.setFare(Math.round(totalFare * 100.0) / 100.0);
         rideRequest.setStatus("REQUESTED");
 
-        // Simple automated driver matching if available
-        List<User> availableDrivers = userRepository.findByRoleAndStatus("DRIVER", "AVAILABLE");
+        // Driver Matching
+        List<User> availableDrivers =
+                userRepository.findByRoleAndStatus("DRIVER", "AVAILABLE");
+
         if (!availableDrivers.isEmpty()) {
+
             User assignedDriver = availableDrivers.get(0);
+
             assignedDriver.setStatus("BUSY");
             userRepository.save(assignedDriver);
-            
+
             rideRequest.setDriver(assignedDriver);
             rideRequest.setStatus("ACCEPTED");
         }
 
-        return ResponseEntity.ok(rideRepository.save(rideRequest));
+        Ride savedRide = rideRepository.save(rideRequest);
+
+        return ResponseEntity.ok(savedRide);
     }
 
-    // 2. Fetch pending rides (Useful for a manual Driver Dashboard view)
+    // Pending Rides
     @GetMapping("/pending")
     public List<Ride> getPendingRides() {
         return rideRepository.findByStatus("REQUESTED");
     }
 
-    // 3. Complete a ride
+    // Complete Ride
     @PostMapping("/{id}/complete")
     public ResponseEntity<?> completeRide(@PathVariable Long id) {
+
         Optional<Ride> rideOpt = rideRepository.findById(id);
+
         if (rideOpt.isPresent()) {
+
             Ride ride = rideOpt.get();
+
             ride.setStatus("COMPLETED");
-            
+
             if (ride.getDriver() != null) {
+
                 User driver = ride.getDriver();
+
                 driver.setStatus("AVAILABLE");
+
                 userRepository.save(driver);
             }
-            
-            return ResponseEntity.ok(rideRepository.save(ride));
+
+            rideRepository.save(ride);
+
+            return ResponseEntity.ok(ride);
         }
+
         return ResponseEntity.notFound().build();
     }
 }
